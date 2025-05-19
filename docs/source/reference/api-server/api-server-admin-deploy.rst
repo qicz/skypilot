@@ -369,6 +369,36 @@ Following tabs describe how to configure credentials for different clouds on the
                     --set lambdaCredentials.enabled=true \
                     --set lambdaCredentials.lambdaSecretName=your_secret_name
 
+    .. tab-item:: Nebius
+        :sync: nebius-creds-tab
+
+        Skypilot uses **Service Account** to authenticate with Nebius.
+        To configure Nebius access, go to the `Service Accounts <https://console.nebius.com/iam/service-accounts>`_ page on your Nebius console and create a new service account.
+
+        Then, add an authorized key to the service account following the instructions `here <https://docs.nebius.com/iam/service-accounts/authorized-keys>`_.
+
+        Once the authorized key is added, create a Kubernetes secret to store the private key:
+
+        .. code-block:: bash
+
+            kubectl create secret generic nebius-credentials \
+              --namespace $NAMESPACE \
+              --from-file=private_key.pem=YOUR_PRIVATE_KEY.pem
+
+        When installing or upgrading the Helm chart, enable Nebius credentials by setting the following values:
+
+        .. code-block:: bash
+
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set nebiusCredentials.enabled=true \
+              --set nebiusCredentials.projectId=YOUR_PROJECT_ID \
+              --set nebiusCredentials.serviceAccountId=YOUR_SERVICE_ACCOUNT_ID \
+              --set nebiusCredentials.publicKeyId=YOUR_PUBLIC_KEY_ID \
+              --set nebiusCredentials.nebiusSecretName=nebius-credentials
+
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
