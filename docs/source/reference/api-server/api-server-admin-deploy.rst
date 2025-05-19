@@ -376,6 +376,9 @@ Following tabs describe how to configure credentials for different clouds on the
         To configure Nebius access, go to the `Service Accounts <https://console.nebius.com/iam/service-accounts>`_ page on your Nebius console and create a new service account.
 
         Then, add an authorized key to the service account following the instructions `here <https://docs.nebius.com/iam/service-accounts/authorized-keys>`_.
+        When creating a key pair, direct the ``--output`` to a known location.
+
+        Find the tenant ID from the web console.
 
         Once the authorized key is added, create a Kubernetes secret to store the private key:
 
@@ -383,7 +386,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
             kubectl create secret generic nebius-credentials \
               --namespace $NAMESPACE \
-              --from-file=private_key.pem=YOUR_PRIVATE_KEY.pem
+              --from-literal=tenant_id=YOUR_TENANT_ID
+              --from-file=credentials.json=SERVICE_ACCOUNT_CREDENTIALS.json
 
         When installing or upgrading the Helm chart, enable Nebius credentials by setting the following values:
 

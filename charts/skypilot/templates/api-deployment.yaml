@@ -131,9 +131,10 @@ spec:
           readOnly: true
         {{- end }}
         {{- if .Values.nebiusCredentials.enabled }}
+        - name: nebius-credentials
+          mountPath: /root/.nebius-credentials
         - name: nebius-config
           mountPath: /root/.nebius
-          readOnly: true
         {{- end }}
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
@@ -263,14 +264,24 @@ spec:
         args:
         - |
           echo "Setting up Nebius credentials..."
-          nebius profile create \
-              --endpoint api.nebius.cloud \
-              --service-account-id {{ .Values.nebiusCredentials.serviceAccountId }} \
-              --public-key-id {{ .Values.nebiusCredentials.publicKeyId }} \
-              --private-key-file /root/.nebius/private_key.pem \
-              --profile skypilot-profile \
-              --parent-id {{ .Values.nebiusCredentials.projectId }}
+          mkdir -p /root/.nebius
+          cp /root/.nebius-credentials/credentials.json /root/.nebius/credentials.json
+          if [ -n "$NEBIUS_TENANT_ID" ]; then
+            echo "Nebius tenant id found in environment variable."
+            echo "$NEBIUS_TENANT_ID" > /root/.nebius/NEBIUS_TENANT_ID.txt
+          else
+            echo "Nebius tenant id not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: NEBIUS_TENANT_ID
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.nebiusCredentials.nebiusSecretName }}
+              key: tenant_id
         volumeMounts:
+        - name: nebius-credentials
+          mountPath: /root/.nebius-credentials
         - name: nebius-config
           mountPath: /root/.nebius
       {{- end }}
@@ -303,9 +314,14 @@ spec:
         emptyDir: {}
       {{- end }}
       {{- if .Values.nebiusCredentials.enabled }}
-      - name: nebius-config
+      - name: nebius-credentials
         secret:
           secretName: {{ .Values.nebiusCredentials.nebiusSecretName }}
+          items:
+          - key: credentials.json
+            path: credentials.json
+      - name: nebius-config
+        emptyDir: {}
       {{- end }}
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
