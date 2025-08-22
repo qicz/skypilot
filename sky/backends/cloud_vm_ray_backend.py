@@ -22,6 +22,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
 
 import colorama
 import psutil
+from sqlalchemy import null
 import yaml
 
 from sky import backends
@@ -3726,6 +3727,42 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.info(
             ux_utils.finishing_message('Setup completed.', setup_log_path))
 
+    def _setup_watcher_thread(
+        self, setup_log_path: str,
+        cluster_name: str
+    ) -> None:
+    
+        # node_to_last_update = {ip: time.time() for ip in ips}
+        unfinished_nodes = set()
+
+        all_pids = set()
+
+        def _unfinished_message() -> str:
+            return f'Job setup in progress ({len(all_pids) - len(unfinished_nodes)}/{len(all_pids)})'
+
+        with rich_utils.safe_status(
+                ux_utils.spinner_message(_unfinished_message())) as spinner:
+            start_time = time.time()
+            setup_timeout = 60
+            while len(unfinished_nodes) < len(all_pids) or len(all_pids) == 0:
+                time.sleep(1)
+                if os.path.exists(setup_log_path):
+                    with open(setup_log_path, 'r') as f:
+                        for line in f:
+                            # Regex to match the pid of the setup process
+                            if "pid=" in line:
+                                all_pids.add(line.split("pid=")[1].split(" ")[0])
+        
+                            for ip in unfinished_ips:
+                                if f"rank={ip_to_rank[ip]}" in line:
+                                    finished_nodes.add(ip)
+                base_message = f'Job setup in progress ({len(finished_nodes)}/{len(ips)})'
+                if time.time() - start_time > setup_timeout:
+                    first_unfinished_ip = unfinished_ips[0]
+                    base_message += f' Worker {first_unfinished_ip} may have stalled. Check logs with `sky logs {cluster_name} --no-follow | grep ip={first_unfinished_ip}`'
+                spinner.update(base_message)
+                    
+
     def _exec_code_on_head(
         self,
         handle: CloudVmRayResourceHandle,
@@ -3806,6 +3843,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return job_submit_cmd
 
         job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
+
+        # setup_watcher_thread = threading.Thread(
+        #     target=self._setup_watcher_thread,
+        #     args=(setup_log_path,
+        #         handle.launched_resources.ips,
+        #         handle.launched_resources.ip_to_rank,
+        #         handle.cluster_name),
+        #     daemon=True
+        # )
+        # setup_watcher_thread.start()
+        # setup_watcher_thread.join()
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -5571,6 +5619,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         task_env_vars = self._get_task_env_vars(task, job_id, handle)
+
+        logger.warning(
+            f"Setup logs going to {os.path.join(log_dir, 'setup.log')}"
+        )
 
         codegen = RayCodeGen()
         codegen.add_prologue(job_id)
