@@ -1258,7 +1258,7 @@ def autostop(
 @annotations.client_api
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False) -> server_common.RequestId[List[dict]]:
+          all_users: bool = False) -> server_common.RequestId[List[responses.ClusterJobRecord]]:
     """Gets the job queue of a cluster.
 
     Args:
@@ -1271,7 +1271,7 @@ def queue(cluster_name: str,
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[Dict[str, Any]]): A list of dicts for each job in the
+        job_records (List[responses.ClusterJobRecord]): A list of dicts for each job in the
             queue.
 
             .. code-block:: python
