@@ -508,7 +508,7 @@ class RayCodeGen:
                             placement_group_bundle_index=i)
                     ) \\
                     .remote(
-                        setup_cmd,
+                        setup_cmd + " && echo 'Setup complete.'",
                         os.path.expanduser({setup_log_path!r}),
                         env_vars={setup_envs!r},
                         stream_logs=True,
@@ -3733,32 +3733,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
     
         # node_to_last_update = {ip: time.time() for ip in ips}
-        unfinished_nodes = set()
+        finished_nodes = set()
 
         all_pids = set()
 
         def _unfinished_message() -> str:
-            return f'Job setup in progress ({len(all_pids) - len(unfinished_nodes)}/{len(all_pids)})'
+            return f'Job setup in progress ({len(all_pids) - len(finished_nodes)}/{len(all_pids)})'
 
         with rich_utils.safe_status(
                 ux_utils.spinner_message(_unfinished_message())) as spinner:
             start_time = time.time()
             setup_timeout = 60
-            while len(unfinished_nodes) < len(all_pids) or len(all_pids) == 0:
+            while len(finished_nodes) < len(all_pids) or len(all_pids) == 0:
                 time.sleep(1)
                 if os.path.exists(setup_log_path):
                     with open(setup_log_path, 'r') as f:
                         for line in f:
                             # Regex to match the pid of the setup process
                             if "pid=" in line:
-                                all_pids.add(line.split("pid=")[1].split(" ")[0])
+                                pid = line.split("pid=")[1].split(" ")[0]
+                                all_pids.add(pid)
         
-                            for ip in unfinished_ips:
-                                if f"rank={ip_to_rank[ip]}" in line:
-                                    finished_nodes.add(ip)
-                base_message = f'Job setup in progress ({len(finished_nodes)}/{len(ips)})'
+                                if "Setup complete." in line:
+                                    finished_nodes.add(pid)
+                base_message = f'Job setup in progress ({len(finished_nodes)}/{len(all_pids)})'
                 if time.time() - start_time > setup_timeout:
-                    first_unfinished_ip = unfinished_ips[0]
+                    first_unfinished_ip = all_pids[0]
                     base_message += f' Worker {first_unfinished_ip} may have stalled. Check logs with `sky logs {cluster_name} --no-follow | grep ip={first_unfinished_ip}`'
                 spinner.update(base_message)
                     
@@ -3855,10 +3855,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # setup_watcher_thread.start()
         # setup_watcher_thread.join()
 
+        tmp_log_path = os.path.join(self.log_dir, 'setup_run.log')
+
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
                                                       stream_logs=False,
-                                                      require_outputs=True)
+                                                      require_outputs=True,
+                                                      log_path=tmp_log_path)
         # Happens when someone calls `sky exec` but remote is outdated for
         # running a job. Necessitating calling `sky launch`.
         backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -3913,11 +3916,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             run_timestamp=self.run_timestamp,
             resources_str=resources_str,
             metadata=metadata)
+        tmp_log_path = os.path.join(self.log_dir, 'add_job.log')
         returncode, result_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
                                                           require_outputs=True,
-                                                          separate_stderr=True)
+                                                          separate_stderr=True,
+                                                          log_path=tmp_log_path)
         # Happens when someone calls `sky exec` but remote is outdated for
         # adding a job. Necessitating calling `sky launch`.
         backend_utils.check_stale_runtime_on_remote(returncode, stderr,
@@ -4124,11 +4129,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stream_logs: bool = True
     ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
+        tmp_log_path = os.path.join(self.log_dir, 'get_job_status.log')
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
                                                       stream_logs=stream_logs,
                                                       require_outputs=True,
-                                                      separate_stderr=True)
+                                                      separate_stderr=True,
+                                                      log_path=tmp_log_path)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
         statuses = job_lib.load_statuses_payload(stdout)
@@ -5092,6 +5099,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
+        logger.warning(f"Lloyd: runonhead log_path: {log_path}")
         return head_runner.run(
             cmd,
             port_forward=port_forward,
